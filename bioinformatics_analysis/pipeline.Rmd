@@ -1,0 +1,551 @@
+---
+title: "Tax3 RA Bioinformatics"
+author: "Neil H-K"
+date: "May 2022"
+output: html_document
+runtime: shiny
+---
+
+```{r import packages}
+library(neo4jshell)
+library(heatmap3)
+library(WGCNA)
+library(igraph)
+library(anRichment)
+
+source('disease_association_heatmap.R')
+
+# connection to private Neo4j Knowledge graph
+con_neo4j <- list(
+  address="neo4j_url", 
+  uid='neo4j_username', 
+  pwd='neo4j_password'
+)
+```
+
+# Figure 3A - Open Targets Disease Association
+
+Retrieve Open Targets disease associations to mapped genes from Tax3 analysis, from Tax3 Neo4J Knowledge Graph (Private)
+
+ 
+```{r disease association}
+
+
+da_heatmap( # RA
+  genes=unique(top_genes$g.ensId),
+  disease_ids=c("EFO_0000685", "EFO_0000676", "EFO_0003767", "MONDO_0004670", "EFO_0005140"),
+  disease_names=c('RA', 'Psor', 'IBD', 'lupus', 'AI'),
+  output_prefix='disease_associations_ra2_set06_v2',
+  credentials_neo4j_txt='neo4j.txt',
+  hide_genes=TRUE,
+  include_zeros=TRUE
+)
+
+da_heatmap( # RA
+  genes=unique(top_genes$g.ensId),
+  disease_ids=c("EFO_0000685", "EFO_0000676", "EFO_0003767", "MONDO_0004670", "EFO_0005140"),
+  disease_names=c('RA', 'Psor', 'IBD', 'lupus', 'AI'),
+  output_prefix='disease_associations_ra2_set06_nozero_v2',
+  credentials_neo4j_txt='neo4j.txt',
+  hide_genes=TRUE,
+  include_zeros=FALSE
+)
+
+da_heatmap( # RA
+  genes=unique(all_genes$g.ensId),
+  disease_ids=c("EFO_0000685", "EFO_0000676", "EFO_0003767", "MONDO_0004670", "EFO_0005140"),
+  disease_names=c('RA', 'Psor', 'IBD', 'lupus', 'AI'),
+  output_prefix='disease_associations_ra2_set06_network_nozero_v2',
+  credentials_neo4j_txt='neo4j.txt',
+  hide_genes=TRUE,
+  include_zeros=FALSE
+)
+```
+
+## Plotting
+
+```{r fig3a}
+tax3_genes <- read.table('disease_associations_ra2_set06_v2.txt',
+                         sep='\t', header=TRUE)
+
+hm_mat <- as.matrix(tax3_genes[,c(5:ncol(tax3_genes))])
+rownames(hm_mat) <- as.character(seq(length(tax3_genes$g.geneName)))
+
+pdf(width=20, height=8, file='disease_association.pdf')
+par(mar=c(1,1,1,1))
+heatmap3(x=t(hm_mat[rev(1:nrow(hm_mat)), rev(1:ncol(hm_mat))]),
+         col=colorRampPalette(c("#FFFCFB", "#DC380E"))(n=100),
+         Colv=NA, Rowv=NA, balanceColor=FALSE, scale="none",
+         cexRow=0.7, cexCol=0.7)
+dev.off()
+```
+
+# Figure 3B - Network Expansion Analysis
+
+Retrieve Tax3 genetic output (Sidak SNPs) and mapped genes from Tax3 Neo4J Knowledge Graph (Private)
+
+```{r ppi, echo=FALSE, message=FALSE, warning=FALSE}
+disease_query <- "MATCH (g:Gene)<-[s2g]-(v:Variant)<--(t:Tax3Result {threshold: \"sidak\"})-->
+                   (s:Study {studyId: \"RA2_SET06\"})
+                  WHERE s2g.confidence > 0 AND EXISTS(g.geneName) AND s2g.tissueWeights = \"RA2_noFUMA\" 
+                  RETURN DISTINCT g.ensId,g.geneName,g.ncbiId,s2g.topsisScore,v.rsId,t.threshold;"
+  
+ra_genes <- neo4j_query(
+  qry=disease_query,
+  con=con_neo4j
+)
+
+ra_genes$s2g.topsisScore <- as.numeric(ra_genes$s2g.topsisScore)
+length(unique(ra_genes$g.ensId))
+
+# only allow TOPSIS > 0.5 and top 5 genes per SNP
+top_genes <- get_top_n_per_snp(gene_df=ra_genes, n_genes=5, protein_coding=FALSE, topsis_min=0.5)
+
+write.csv(top_genes, 
+          'ra2_top5genes_topsis0.5_v2.csv', 
+          quote=FALSE, row.names=FALSE)
+rownames(top_genes) <- seq(nrow(top_genes))
+
+# Get Direct Interactions
+all_int <- data.frame(from=c(), score=c(), to=c())
+genes <- unique(top_genes$g.ensId)
+
+direct_int_query <- paste("WITH [\"", paste(unique(genes), collapse='\", \"'), "\"] AS genes 
+                            MATCH (g1:Gene)-[i:INTERACTS_WITH]->(g2:Gene)
+                            WHERE g1.ensId IN genes 
+                              AND g2.ensId IN genes 
+                              AND i.sourceDatabase = \"intact\"
+                              AND i.scoring >= 0.5
+                              AND g1.ensId <> g2.ensId
+                            RETURN DISTINCT g1.ensId,i.scoring,g2.ensId;", sep='')
+
+direct_int <- neo4j_query(
+  qry=direct_int_query,
+  con=con_neo4j
+)
+names(direct_int) <- c('from', 'score', 'to')
+all_int <- rbind(all_int, direct_int)
+
+# Get Interactors
+interactor_query <- paste("WITH [\"", paste(unique(genes), collapse='\", \"'), "\"] AS genes
+                       MATCH (g1:Gene)-[i1:INTERACTS_WITH]->(g2:Gene)-[i2:INTERACTS_WITH]->(g3:Gene)
+                       WHERE g1.ensId IN genes 
+                         AND g3.ensId IN genes
+                         AND g1.ensId <> g3.ensId 
+                         AND i1.sourceDatabase = \"intact\"
+                         AND i1.scoring >= 0.5
+                         AND i2.sourceDatabase = \"intact\"
+                         AND i2.scoring >= 0.5
+                        RETURN DISTINCT g1.ensId,i1.scoring,g2.ensId,i2.scoring,g3.ensId;", sep='')
+
+interactors <- neo4j_query(
+  qry=interactor_query,
+  con=con_neo4j
+)
+names(interactors) <- c("from", "score", "to", "i2.stringDbExperimental", "g3.ensId")
+
+# combine all interactions into one dataframe (node-score-node)
+all_int <- rbind(all_int, interactors[,1:3])
+names(interactors) <- c("g.ensId", "i.stringDbExperimental", "from", "score", "to")
+all_int <- rbind(all_int, interactors[,3:5])
+all_int$score <- as.numeric(all_int$score)
+
+int_ids <- c()
+for (i in 1:nrow(all_int)) {
+  ids <- c(all_int$from[i], all_int$to[i])
+  int_ids <- c(int_ids, paste(ids[order(ids)], collapse='_'))
+}
+all_int_dedup <- all_int[!duplicated(paste(int_ids, all_int$score)),]
+
+all_genes <- unique(c(all_int_dedup$from, all_int_dedup$to))
+all_gene_query <- paste("WITH [\"", paste(all_genes, collapse='\", \"'), "\"] AS genes
+                        MATCH (g:Gene)
+                        WHERE g.ensId IN genes
+                        RETURN DISTINCT g.geneName,g.ensId,g.geneType,g.mhcRegion,g.description,g.ncbiId;",
+                        sep='')
+
+all_genes <- neo4j_query(
+  qry=all_gene_query,
+  con=con_neo4j
+)
+
+# get best topsis 
+index <- c()
+for (gene in unique(top_genes$g.ensId)) {
+  gene_rows <- top_genes[top_genes$g.ensId == gene,]
+  gene_rows <- gene_rows[order(gene_rows$s2g.topsisScore, decreasing = TRUE),]
+  index <- c(index, as.numeric(rownames(gene_rows)[1]))
+}
+top_s2g <- top_genes[index,]
+
+all_genes <- merge(all_genes, top_s2g, all.x=T)
+all_genes$tax3 <- 1
+all_genes$tax3[is.na(all_genes$s2g.topsisScore)] <- 0
+gene_order <- all_genes$g.ensId
+
+edges <- all_int_dedup
+
+write.table(all_genes, 
+            'ra2_sidak_network_genes_v3.txt', 
+            quote=FALSE, row.names=FALSE, sep='\t')
+write.csv(edges, 
+          'ra2_sidak_network_edges_v3.csv', 
+          quote=FALSE, row.names=FALSE)
+```
+
+## Plotting
+
+```{r fig3b}
+all_genes <- read.table('ra2_sidak_network_genes_v3.txt',
+                          sep='\t', header=T)
+edges <- read.csv('ra2_sidak_network_edges_v3.csv')
+gene_order <- all_genes$g.ensId
+
+edges$score <- as.numeric(edges$score)
+edges$width <- edges$score*10
+
+colours <- numbers2colors(as.numeric(all_genes$s2g.topsisScore), naColor = 'gainsboro')
+
+shapes <- rep('circle', nrow(all_genes))
+shapes[all_genes$tax3 == 1] <- 'square'
+sg_nodes <- data.frame(label=all_genes$g.geneName, 
+                       id=all_genes$g.ensId, 
+                       color=colours, 
+                       title=paste(all_genes$t.threshold, 
+                                   'MHC:', all_genes$g.mhcRegion, 
+                                   all_genes$g.description),
+                       shape=shapes)
+
+graph1 <- graph_from_data_frame(
+  data.frame(from=edges$from, to=edges$to), 
+  directed=FALSE, vertices=sg_nodes[,c(2,3,4,5)]
+)
+
+pdf(width=12, height=10, file='ra_network.pdf')
+  plot.igraph(graph1, vertex.size=2, vertex.label=NA)
+dev.off()
+```
+
+# Figure 3C - Coexpression Clustering Using WGCNA
+
+```{r wgcna}
+# Get Data from Genevestigator, parse samples
+
+ra_gv_all <- read.table(
+  'RA2_network_gv_parsed_v2.1.txt',
+  sep='\t', header=TRUE
+)
+
+ra_gv_metadata <- read.table(
+  'RA2_network_gv_metadata_parsed_v2.txt',
+  sep='\t', header=TRUE
+)
+
+ra_gv <- ra_gv_all[match(ra_gv_metadata$sample_id, ra_gv_all$sample_id),]
+
+# sample IDs changed so needed to manually match IDs
+
+metadata <-  ra_gv_metadata
+expression <- as.matrix(t(ra_gv[,5:ncol(ra_gv)]))
+rownames(expression) <- colnames(ra_gv)[5:ncol(ra_gv)]
+colnames(expression) <- ra_gv$sample_id
+
+# remove genes with expression=0
+zero_genes <- colSums(t(expression))
+expression <- expression[zero_genes > 0, ]
+
+# HCLUST
+sampleTree <- hclust(dist(t(expression)), method = "ward.D2")
+traits <- metadata[,c(1,2,4,5,6,7,8,9,11,10)]
+rownames(traits) <- metadata$sample_id_new
+
+traitColors <- cbind(labels2colors(traits[,1:9]), numbers2colors(traits[,10]))
+png('RA2_hclust_gene_expression_dendrogram_v2.1.png',
+    width=2000, height=800)
+  plotDendroAndColors(sampleTree, traitColors, cex.dendroLabels = 0.1,
+                      groupLabels=names(traits), 
+                      main = "Sample dendrogram and trait heatmap")
+dev.off()
+write.csv(metadata[sampleTree$order,],
+          'RA2_hclust_tissue_order_v2.1.csv',
+          row.names=F, quote=F)
+
+# WGCNA
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(t(expression), powerVector = powers, verbose = 5)
+# Plot the results:
+#sizeGrWindow(9, 5)
+par(mfrow = c(1,2))
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+  xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+  main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+
+
+datExpr <- t(expression)
+net <- blockwiseModules(datExpr, power = 5,
+  TOMType = "unsigned", 
+  minModuleSize = 5,
+  reassignThreshold = 0, 
+  mergeCutHeight = 0.25,
+  numericLabels = TRUE, pamRespectsDendro = FALSE,
+  verbose = 3)
+
+mergedColors <- labels2colors(net$colors)
+# Plot the dendrogram and the module colors underneath
+png('ra2_wgcna_gene_dendrogram_v2.1.png',
+    width=1000, height=800)
+  plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
+    "Module colors",
+    dendroLabels=FALSE, hang = 0.03,
+    addGuide=TRUE, guideHang = 0.05)
+dev.off()
+
+# Define numbers of genes and samples
+nGenes = ncol(datExpr);
+nSamples = nrow(datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(datExpr, mergedColors)$eigengenes
+MEs = orderMEs(MEs0)
+saveRDS(MEs, 'ra2_MEs.RDS')
+
+# Plot Eigengenes and Modules
+for (mod_name in unique(mergedColors)) {
+  mod_genes <- names(net$colors)[which(mergedColors == mod_name)]
+  mod_expr <- datExpr[sampleTree$order, mod_genes]
+  y_limits <- c(min(mod_expr, na.rm=TRUE), max(mod_expr, na.rm=TRUE))
+  mod_expr[is.na(mod_expr)] <-  0
+  png(filename=paste('ra2_wgcna_eigengene_module', 
+                     mod_name, '_v2.1.png', sep=''),
+      width=2000, height=600)
+    plot(seq(nrow(MEs)), MEs[sampleTree$order, which(names(MEs) == paste('ME', mod_name, sep=''))],
+         type='n', ylim=y_limits, 
+         frame.plot=FALSE, xaxt='n', xlab='', ylab='expression', main='')
+    for (i in 1:ncol(mod_expr)) {
+      par(new=TRUE)
+      plot(seq(nrow(MEs)), mod_expr[, i],
+         type='l', ylim=y_limits, 
+         frame.plot=FALSE, xaxt='n', yaxt='n', xlab='', ylab='', main='', col='gray', lwd=0.5)
+    }
+    par(new=TRUE)
+    plot(seq(nrow(MEs)), MEs[sampleTree$order, which(names(MEs) == paste('ME', mod_name, sep=''))],
+         type='l', #ylim=c(0, max(mod_expr)), 
+         frame.plot=FALSE, xaxt='n', yaxt='n', xlab='', ylab='', main='', col=mod_name, lwd=2)
+  dev.off()
+}
+
+# Plot all cluster eigengenes
+module_names <- unique(mergedColors)
+png(filename='ra2_wgcna_eigengene_all_modules_v2.1.png',
+    width=2000, height=600)
+plot(seq(nrow(MEs)), MEs[sampleTree$order, which(names(MEs) == paste('ME', module_names[1], sep=''))],
+       type='l', 
+       frame.plot=FALSE, xaxt='n', xlab='', ylab='expression', main='', col=module_names[1], lwd=2)
+for (mod_name in module_names[2:length(module_names)]) {
+    par(new=TRUE)
+    plot(seq(nrow(MEs)), MEs[sampleTree$order, which(names(MEs) == paste('ME', mod_name, sep=''))],
+         type='l',
+         frame.plot=FALSE, xaxt='n', yaxt='n', xlab='', ylab='', main='', col=mod_name, lwd=2)
+}
+dev.off()
+
+# write gene module membership
+mod_genes <-  vector()
+mod_col <-vector()
+for (mod_name in unique(mergedColors)) {
+  this_mod <- names(net$colors)[which(mergedColors == mod_name)]
+  mod_genes <- c(mod_genes, this_mod)
+  mod_col <- c(mod_col, rep(mod_name, length(this_mod)))
+}
+wgcna_cluster <- data.frame(module=mod_col, gene=mod_genes)
+write.table(wgcna_cluster,
+            'ra2_wgcna_module_labels_v2.1.txt', sep='\t', 
+            row.names=FALSE, quote=FALSE)
+
+wgcna_cluster <- read.table('ra2_wgcna_module_labels_v2.txt', 
+                            sep='\t', header=TRUE)
+
+all_genes$wgcna_cluster <- wgcna_cluster$module[match(all_genes$g.ensId, wgcna_cluster$gene)]
+write.table(all_genes, 
+          'ra2_network_all_genes_wgcna_v2.1.tsv', 
+          quote=FALSE, row.names=FALSE, sep='\t')
+
+```
+
+## Plotting
+
+```{r fig3c}
+MEs <- readRDS('ra2_MEs.RDS')
+hm_mat <- cor(MEs)
+
+pdf(width=10, height=10, file='eigengene_correlation_matrix.pdf')
+par(mar=c(1,1,1,1))
+heatmap3(x=hm_mat, balanceColor=TRUE, col=blueWhiteRed(n=200),
+         Colv=NA, scale="none",
+         Rowv=NA,
+         showColDendro=FALSE, showRowDendro=FALSE,
+         na.rm = FALSE)
+dev.off()
+```
+
+# Figure 3D -  Enrichment Analysis
+
+```{r cluster enrichment, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE,eval=FALSE}
+GOcollection <- buildGOcollection(organism = "human")
+biosysCollection <- BioSystemsCollection("human")
+
+combinedCollection = mergeCollections(
+  GOcollection, biosysCollection
+)
+
+all_wgcna <- neo4j_query(
+  qry=paste("MATCH (g:Gene)
+               WHERE g.ensId IN [\"", paste(wgcna_cluster$gene, collapse="\", \""), "\"]
+              RETURN DISTINCT g.ensId,g.ncbiId,g.geneType,g.mhcRegion,g.geneName,g.description;",
+               sep=''),
+  con=con_neo4j
+)
+wgcna_clusters <- wgcna_cluster
+names(wgcna_clusters)[2] <- 'g.ensId'
+all_wgcna <- merge(all_wgcna, wgcna_clusters)
+all_wgcna <- merge(all_wgcna, all_genes[,c("g.ensId", "tax3")], all.x=TRUE)
+all_wgcna$tax3[is.na(all_wgcna$tax3)] <- 1
+
+
+# whole gene list
+go_enrich <- enrichmentAnalysis(
+  classLabels=all_wgcna$tax3[all_wgcna$g.geneType == 'protein_coding'],
+  identifiers=all_wgcna$g.ncbiId[all_wgcna$g.geneType == 'protein_coding'],
+  refCollection=combinedCollection,
+  nBestDataSets=100,
+  getOverlapSymbols=TRUE,
+  getOverlapEntrez=FALSE
+)
+enrich_df <- go_enrich$enrichmentTable
+
+###### DONT USE CSV - SOME TERMS HAVE COMMAS
+write.csv(enrich_df[enrich_df$class == 1,], 
+          'ra2_top_genes_sidak_pathway_enrichment_v2.1.csv', 
+          quote=FALSE, row.names=FALSE)
+
+# non-mhc
+go_enrich <- enrichmentAnalysis(
+  classLabels=all_wgcna$tax3[all_wgcna$g.geneType == 'protein_coding' & all_wgcna$g.mhcRegion == 0],
+  identifiers=all_wgcna$g.ncbiId[all_wgcna$g.geneType == 'protein_coding' & all_wgcna$g.mhcRegion == 0],
+  refCollection=combinedCollection,
+  nBestDataSets=100,
+  getOverlapSymbols=TRUE,
+  getOverlapEntrez=FALSE
+)
+enrich_df <- go_enrich$enrichmentTable
+
+write.csv(enrich_df[enrich_df$class == 1,], 
+          'ra2_top_genes_sidak_pathway_enrichment_noMHC_v2.1.csv', 
+          quote=FALSE, row.names=FALSE)
+
+# wgcna clusters
+go_enrich <- enrichmentAnalysis(
+  classLabels=all_wgcna$module,
+  identifiers=all_wgcna$g.ncbiId,
+  refCollection=combinedCollection,
+  nBestDataSets=10,
+  getOverlapSymbols=TRUE,
+  getOverlapEntrez=FALSE
+)
+enrich_df <- go_enrich$enrichmentTable
+
+write.csv(enrich_df, 
+          'ra2_top_genes_sidak_pathway_enrichment_wgcna_clusters_v2.1.csv', 
+          quote=FALSE, row.names=FALSE)
+
+# network clusters
+go_enrich <- enrichmentAnalysis(
+  classLabels=all_genes$groupname,
+  identifiers=all_genes$g.ncbiId,
+  refCollection=combinedCollection,
+  nBestDataSets=10,
+  getOverlapSymbols=TRUE,
+  getOverlapEntrez=FALSE
+)
+enrich_df <- go_enrich$enrichmentTable
+write.csv(enrich_df, 
+          'ra2_top_genes_sidak_pathway_enrichment_network_clusters_v2.1.csv', 
+          quote=FALSE, row.names=FALSE)
+```
+
+## Plotting
+
+```{r fig3e}
+enrich_df <- read.csv('ra2_top_genes_sidak_pathway_enrichment_wgcna_clusters_v2.1.csv')
+significant <- enrich_df[enrich_df$FDR < 0.05 & enrich_df$class %in% c('black', 'brown', 'purple', 'tan', 'turquoise'),]
+
+relevant <- enrich_df[c(1, 2, 5, 4,
+                        21, 22,
+                        83, 84,
+                        114, 118, 117, 116, 127, 132, 128, 134, 133, 137,
+                        237, 238, 239),]
+
+pdf('enrichment.pdf',
+    width=8, height=6)
+  barplot(-log10(relevant$FDR), col='#0F262C', ylim=c(0,20))
+  abline(h=c(5,10,15), col='grey', lty=3)
+  par(new=T)
+  barplot(-log10(relevant$FDR), col='#0F262C', ylim=c(0,20), yaxt='n')
+  abline(h=-log10(0.05), col='#DC380E', lwd=2, lty=3)
+dev.off()
+```
+
+# Figure 3E - Plot Purple Network
+
+```{r fig3f}
+all_genes <- read.table('ra2_network_all_genes_wgcna_v2.1.tsv',
+                          sep='\t', header=T)
+
+module_genes <- all_genes$g.ensId[all_genes$wgcna_cluster == 'purple']
+
+edges <- read.csv('ra2_sidak_network_edges_v3.csv')
+cl_edges <- edges[which(edges$from %in% module_genes | edges$to %in% module_genes),]
+cl_edges <- cl_edges[cl_edges$from != cl_edges$to,]
+
+module_genes <- unique(c(cl_edges$from, cl_edges$to))
+cl_edges <- edges[which(edges$from %in% module_genes & edges$to %in% module_genes),]
+cl_edges <- cl_edges[cl_edges$from != cl_edges$to,]
+
+cl_generows <- all_genes[match(module_genes, all_genes$g.ensId),]
+
+shapes <- rep('circle', nrow(cl_generows))
+shapes[cl_generows$tax3 == 1] <- 'square'
+all_nodes <- data.frame( 
+                     id=cl_generows$g.ensId, 
+                     color=cl_generows$wgcna_cluster, 
+                     title=paste(cl_generows$t.threshold, 
+                                 'MHC:', cl_generows$g.mhcRegion, 
+                                 cl_generows$g.description),
+                     label=cl_generows$g.geneName,
+                     shape=shapes)
+
+graph1 <- graph_from_data_frame(
+  data.frame(from=cl_edges$from, to=cl_edges$to), 
+  directed=FALSE, vertices=all_nodes
+)
+
+
+
+pdf(width=10, height=10, file='purple_network.pdf')
+  set.seed(42)
+  plot.igraph(graph1, vertex.size=7,
+              vertex.label.family="sans", vertex.label.color='black', 
+              vertex.label.dist=1, vertex.label.degree=pi/2)
+dev.off()
+```
