@@ -8,13 +8,6 @@ They perform p-value parametric assessments based on resampled PCA loadings.
 
 This assessment is based on Mixture Models[^1] using the Expectation Maximisation (EM) algorithm[^2] applied typically to _Gaussian_ Mixture Models (GMM)[^3] .
 
-## Documents
-
-- [report](./documents/significance_assessment/mixmod_august_2010.pdf)
-- [exploration of likelihood space](./documents/significance_assessment/local_maximum_likelihood.pdf)
-- [beta mixture](./documents/significance_assessment/beta_mixture.pdf)
-- [gene level](./documents/gene_level_analysis/mixmod_gene.pdf)
-
 ## Objectives
 
 Any signal, such as the distribution of resampled loadings of a variable of interest (in green below), can be modeled with a mixture (blue line) of Gaussian distributions (dotted black lines). This allows to assess the significance of this variable : its p-value is calculated from the area of the mixture distribution right of the observed loading (dotted red line) :
@@ -115,7 +108,6 @@ Sometimes, for a given number of distributions, chains do not converge. This opt
 # Number of re-tries with a model that fails
 EM_ERROR=5
 ```
-
 
 ### STEPS
 
