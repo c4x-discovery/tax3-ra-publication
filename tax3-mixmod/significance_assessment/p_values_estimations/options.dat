@@ -1,0 +1,210 @@
+###############################################################
+# PVALUES ESTIMATION
+#
+# ANALYSIS OPTIONS
+###############################################################
+
+#-------------------------------------------------------------#
+# GRAPH PARAMETERS
+#-------------------------------------------------------------#
+
+#
+# Are we doing graphs ? 
+# yes / no (speed-up)
+DOGRAPH=no
+
+#
+
+#
+# Main title : should be enclosed by double quotes
+#
+TITLE="test1"
+
+#-------------------------------------------------------------#
+# ANALYSIS TYPE
+#-------------------------------------------------------------#
+
+#
+# Loadings : 
+#  - component
+#  - projection
+#
+LOADING_TYPE=component
+
+#-------------------------------------------------------------#
+# EM ALGORITHM OPTIONS 
+#-------------------------------------------------------------#
+
+#
+# Mixture model, either:
+#  - beta  
+#  - gaussian
+#
+MODEL=gaussian
+
+#
+# number of resamplings kept for modeling
+#
+N_RESAMPLINGS=1000
+
+#
+# Number of tries with model that fails : default=5
+#
+EM_ERROR=3
+
+#
+# EM EPSILON : default 1e-4
+#
+EM_EPSILON=0.0001
+
+#
+# NBITERATION : default 200
+#
+EM_NBITERATION=200
+
+# Do we do a prerun with a small sample of the dataset to generate starting values?
+# yes, no, alt (default)
+# alt will do preruns 50% of the time as prerun with small sample set may bias results
+DO_PRE_RUN=alt
+
+# PRERUN_INIT : SMALL_EM or RANDOM (default)
+PRE_RUN_INIT_TYPE=RANDOM
+
+# RunInitType ( if no PreRun or PreRun fails) : SMALL_EM (default) / RANDOM
+RUN_INIT_TYPE=SMALL_EM
+
+
+# STEPx_CHAIN_MODE:
+#    fixed    : will always run STEPx_N_CHAINS chains
+#    adaptive : will run a number of chains equal to the number of distributions
+#               and a minimum of STEPx_N_CHAINS
+
+# STEPx_EXPLORATION_MODE : defines the stopping criteria
+#    raise    : needs BICs to raise 'STEPx_EXPLORATION_LIMIT' times (default)
+#    higher   : needs BICs to be higher 'STEPx_EXPLORATION_LIMIT' times
+
+
+# -----------------------------------
+# STEP 1:
+
+# TYPICAL SETTINGS FOR FAST STEP1 (requires STEP2) (gene level)
+# STEP1_CHAIN_MODE=fixed
+# STEP1_N_CHAINS=1
+# STEP1_EXPLORATION_RAISED_LIMIT=1
+# STEP1_EXPLORATION_HIGHER_LIMIT=1
+
+# TYPICAL SETTINGS FOR THOROUGH STEP1 (no STEP2 needed) (snp level)
+# STEP1_CHAIN_MODE=adaptive
+# STEP1_N_CHAINS=1
+# STEP1_EXPLORATION_RAISED_LIMIT=4
+# STEP1_EXPLORATION_HIGHER_LIMIT=10
+
+STEP1_CHAIN_MODE=adaptive
+STEP1_N_CHAINS=1
+STEP1_EXPLORATION_RAISED_LIMIT=4
+STEP1_EXPLORATION_HIGHER_LIMIT=10
+STEP1_MAX_DIST=10
+
+# -----------------------------------
+# STEP 2:
+
+# Enable STEP 2 ?
+# yes or no
+ENABLE_STEP2=yes
+
+STEP2_CHAIN_MODE=fixed
+STEP2_N_CHAINS=50
+STEP2_EXPLORATION_RAISED_LIMIT=1
+STEP2_EXPLORATION_HIGHER_LIMIT=1
+
+#-------------------------------------------------------------#
+# TRANSFORM PARAMETERS
+#-------------------------------------------------------------#
+
+# none	: no data transform
+# mirror : duplicate data with oposite values
+# fold	: take absolute values
+TRANSFORM=mirror			
+
+MIRROR_SYMETRY=true		# make init parameters symetric (true / false)
+MIRROR_NDIST_INIT=1		# number of distributions to start from
+MIRROR_NDIST_STEP=1		# step when increasing number of distributions
+MIRROR_BIC_CORRECTION=true	# BIC correction (true / false) should always be true for production
+
+
+
+#-------------------------------------------------------------#
+# LAUNCH OPTIONS 
+#-------------------------------------------------------------#
+
+# multi thread - if yes : should request one node : -l nodes=1
+RUN_CHAINS_IN_PARALLEL=yes
+
+#
+# AT or QSUB
+#
+EXEC_MODE=at
+
+#
+# QSUB arguments (double quoted)
+# request 1 CPU on 1 node : "-l nodes=1:ppn=1"
+# no email notification : -m ""
+# delay start : -a CCYYMMDDhhmm
+# maximum number of seconds qsub will block attempting to contact pbs_server : -b <sec>
+# interval at which the job will be checkpointed : -c c=<minutes>
+#
+QSUB_ARGS="-m \"\" -a `date --date="+10 minutes" +"%Y%m%d%H%M"` -b 3600 -c c=10"
+
+#
+# QSUB BATCH
+# if not blank qsub commands will be stored in the given file name, to be executed later by the user
+# if blank ("") : qsub commands are executed immidiately
+#
+QSUB_BATCH=""
+
+#-------------------------------------------------------------#
+# DIRECTORIES 
+#-------------------------------------------------------------#
+#
+# directory where analysis is launched
+#
+HERE=/home/olivier/Documents/tests/mixmod/runner/test1/
+
+#
+# batch file directory : where runner batches are
+#
+BATCH_DIR=/home/tax3bin/tax3mixmod/significance_assessment/p_values_estimations/
+
+#
+# R source directory
+#
+R_DIR=/home/tax3bin/tax3R
+
+#
+# path where to find resampling results
+# one CSV file for each variable to be analyzed
+#
+RESULTS=/home/olivier/Documents/tests/mixmod/runner/test1/data/
+
+#
+# output directory
+#
+OUTDIR=/home/olivier/Documents/tests/mixmod/runner/test1/run/
+
+
+#-------------------------------------------------------------#
+# FILES 
+#-------------------------------------------------------------#
+#
+# where to find observed loadings.csv
+#
+LOADINGS=/home/olivier/Documents/tests/mixmod/runner/test1/data/loadings.csv
+
+#
+# list of variables and their component to be analysed
+# two columns : Variables,Component
+# has one header line
+#
+VARIABLES=/home/olivier/Documents/tests/mixmod/runner/test1/data/variables.txt
+
+
