@@ -1,6 +1,6 @@
 # Tax3 Mixmod Algorithm
 
-These algorithms were developped in 2010, with the Modal team (https://www.inria.fr/en/modal) and their Mixmod tool :
+These algorithms were developed in 2010, with the Modal team (https://www.inria.fr/en/modal) and their Mixmod tool :
 - https://showroom.saclay.inria.fr/asset/mixmod/
 - also an R package since 2015 : https://hal.archives-ouvertes.fr/hal-00919486
 
