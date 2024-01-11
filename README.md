@@ -1,5 +1,7 @@
 # C4XD Taxonomy3 RA Analysis Code
 
+[![DOI](https://zenodo.org/badge/727773165.svg)](https://zenodo.org/doi/10.5281/zenodo.10491397)
+
 Source code to accompany publication [here]()
 
 ## Contents
